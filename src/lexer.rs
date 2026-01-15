@@ -7,25 +7,18 @@ pub enum LexerError {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum TokenLiteral {
+pub enum Token {
+    // Special
+    EOF,
+    ID(String),
+
+    // Literals
     Int(i32),        // 123
     Float(f32),      // 45.32f
     Char(char),      // 'a'
     String(String),  // "Hello, World!"
-}
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum TokenSeparator {
-    OParen,          // (
-    CParen,          // )
-    OCurly,          // {
-    CCurly,          // }
-    Colon,           // ,
-    SemiColon,       // ;
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub enum TokenOperator {
+    // Operators
     Plus,            // +
     Minus,           // -
     Multiply,        // *
@@ -56,15 +49,14 @@ pub enum TokenOperator {
     XorEqual,        // ^=
     ShiftLeftEqual,  // <<=
     ShiftRightEqual, // >>=  `ShREq` operator :)
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub enum Token {
-    EOF,
-    Literal(TokenLiteral),
-    Operator(TokenOperator),
-    Separator(TokenSeparator),
-    ID(String),
+    
+    // Separators
+    OParen,          // (
+    CParen,          // )
+    OCurly,          // {
+    CCurly,          // }
+    Comma,           // ,
+    SemiColon,       // ;
 }
 
 #[derive(Debug, Clone)]
@@ -101,11 +93,13 @@ impl Lexer {
         }
     }
 
-    pub fn get_token(&mut self) ->Result<Token, LexerError> {
+    pub fn get_token(&mut self) -> Result<Token, LexerError> {
         self.trim_left();
         if self.is_empty() { return Ok(Token::EOF); }
 
         let cur_char = self.get_char(0).unwrap();
+
+        // TODO: add comments support
         
         if cur_char.is_alphabetic() {
             let start: usize = self.cur;
@@ -122,7 +116,7 @@ impl Lexer {
                 self.chop_char();
             }
             let value: i32 = self.source[start..self.cur].parse().unwrap();
-            return Ok(Token::Literal(TokenLiteral::Int(value)));
+            return Ok(Token::Int(value));
         }
 
         if cur_char == '"' {
@@ -164,68 +158,67 @@ impl Lexer {
                 self.chop_char();
             }
             self.chop_char();
-            return Ok(Token::Literal(TokenLiteral::String(string.into_iter().collect::<String>())));
+            return Ok(Token::String(string.into_iter().collect::<String>()));
         }
 
         self.chop_char();
 
         return Ok(match cur_char {
-            '(' => Token::Separator(TokenSeparator::OParen),
-            ')' => Token::Separator(TokenSeparator::CParen),
-            '{' => Token::Separator(TokenSeparator::OCurly),
-            '}' => Token::Separator(TokenSeparator::CCurly),
-            ';' => Token::Separator(TokenSeparator::SemiColon),
-            ',' => Token::Separator(TokenSeparator::SemiColon),
+            '(' => Token::OParen,
+            ')' => Token::CParen,
+            '{' => Token::OCurly,
+            '}' => Token::CCurly,
+            ';' => Token::SemiColon,
+            ',' => Token::Comma,
 
             '=' => {
                 if self.is_empty() || self.get_char(0).unwrap() != '=' {
-                    Token::Operator(TokenOperator::Equal)
+                    Token::Equal
                 } else {
-                    Token::Operator(TokenOperator::EqualEqual)
+                    Token::EqualEqual
                 }
             },
             '+' => {
                 if !self.is_empty() {
                     match self.get_char(0).unwrap() {
-                        '+' => Token::Operator(TokenOperator::PlusPlus),
-                        '=' => Token::Operator(TokenOperator::PlusEqual),
-                        _   => Token::Operator(TokenOperator::Plus),
+                        '+' => Token::PlusPlus,
+                        '=' => Token::PlusEqual,
+                        _   => Token::Plus,
                     }
                 } else {
-                    Token::Operator(TokenOperator::Plus)
+                    Token::Plus
                 }
             },
             '-' => {
                 if !self.is_empty() {
                     match self.get_char(0).unwrap() {
-                        '-' => Token::Operator(TokenOperator::MinusMinus),
-                        '=' => Token::Operator(TokenOperator::MinusEqual),
-                        _   => Token::Operator(TokenOperator::Minus),
+                        '-' => Token::MinusMinus,
+                        '=' => Token::MinusEqual,
+                        _   => Token::Minus,
                     }
                 } else {
-                    Token::Operator(TokenOperator::Minus)
+                    Token::Minus
                 }
             },
             '*' => {
                 if self.is_empty() || self.get_char(0).unwrap() != '=' {
-                    Token::Operator(TokenOperator::Multiply)
+                    Token::Multiply
                 } else {
-                    Token::Operator(TokenOperator::MultiplyEqual)
+                    Token::MultiplyEqual
                 }
             },
             '/' => {
                 if self.is_empty() || self.get_char(0).unwrap() != '=' {
-                    Token::Operator(TokenOperator::Divide)
+                    Token::Divide
                 } else {
-                    Token::Operator(TokenOperator::DivideEqual)
+                    Token::DivideEqual
                 }
             },
-
             '%' => {
                 if self.is_empty() || self.get_char(0).unwrap() != '=' {
-                    Token::Operator(TokenOperator::Mod)
+                    Token::Mod
                 } else {
-                    Token::Operator(TokenOperator::ModEqual)
+                    Token::ModEqual
                 }
             }
             // TODO: add proper error reporting
@@ -267,4 +260,3 @@ impl Lexer {
         self.source.chars().nth(self.cur + index)
     }
 }
-
