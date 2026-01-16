@@ -2,11 +2,12 @@ use std::fmt;
 
 #[derive(Debug, Clone)]
 pub enum LexerError {
-    UnclosedStringLiteral,
+    UnterminatedStringLiteral,
     UnknownEscapeSequence(String),
+    UnknownToken(char),
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum Token {
     // Special
     EOF,
@@ -59,6 +60,13 @@ pub enum Token {
     SemiColon,       // ;
 }
 
+impl PartialEq for Token {
+    fn eq(&self, other: &Self) -> bool {
+        use std::mem;
+        mem::discriminant(self) == mem::discriminant(other)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Location {
     pub filepath: String,
@@ -93,17 +101,28 @@ impl Lexer {
         }
     }
 
+    pub fn expect_token(&mut self, expected_token: Token) -> Result<Option<Token>, LexerError> {
+        match self.get_token() {
+            Ok(token) => Ok(if token == expected_token {
+                Some(token)
+            } else {
+                None
+            }),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn get_token(&mut self) -> Result<Token, LexerError> {
         self.trim_left();
         if self.is_empty() { return Ok(Token::EOF); }
 
-        let cur_char = self.get_char(0).unwrap();
+        let cur_char = self.get_char().unwrap();
 
-        // TODO: add comments support
+        // TODO: add comments support. Maybe remove those in preprocessor stage???
         
         if cur_char.is_alphabetic() {
             let start: usize = self.cur;
-            while !self.is_empty() && self.get_char(0).unwrap().is_alphanumeric() {
+            while !self.is_empty() && self.get_char().unwrap().is_alphanumeric() {
                 self.chop_char();
             }
 
@@ -112,7 +131,7 @@ impl Lexer {
 
         if cur_char.is_ascii_digit() {
             let start = self.cur;
-            while !self.is_empty() && self.get_char(0).unwrap().is_ascii_digit() {
+            while !self.is_empty() && self.get_char().unwrap().is_ascii_digit() {
                 self.chop_char();
             }
             let value: i32 = self.source[start..self.cur].parse().unwrap();
@@ -124,14 +143,14 @@ impl Lexer {
             self.chop_char();
             let mut string: Vec<char> = Vec::new();
             loop {
-                if self.is_empty() { return Err(LexerError::UnclosedStringLiteral); }
-                let ch = self.get_char(0).unwrap();
+                if self.is_empty() { return Err(LexerError::UnterminatedStringLiteral); }
+                let ch = self.get_char().unwrap();
                 if ch == '"' { break; }
 
                 if ch == '\\' {
-                    if self.is_empty() { return Err(LexerError::UnclosedStringLiteral); }
+                    if self.is_empty() { return Err(LexerError::UnterminatedStringLiteral); }
                     self.chop_char();
-                    string.push(match self.get_char(0).unwrap() {
+                    string.push(match self.get_char().unwrap() {
                         // TODO: add support for \nnn, \xhh…, \uhhhh, \Uhhhhhhhh
                         // https://en.wikipedia.org/wiki/Escape_sequences_in_C#Escape_sequences
                         'a' => 0x07 as char, // Alert (Beep, Bell) - Added in C89
@@ -149,7 +168,7 @@ impl Lexer {
                         '"' => '"',
                         '\\' => '\\',
                         _ => return Err(
-                            LexerError::UnknownEscapeSequence(format!("\\{}", self.get_char(0).unwrap()))
+                            LexerError::UnknownEscapeSequence(format!("\\{}", self.get_char().unwrap()))
                         ),
                     });
                 } else {
@@ -172,7 +191,7 @@ impl Lexer {
             ',' => Token::Comma,
 
             '=' => {
-                if self.is_empty() || self.get_char(0).unwrap() != '=' {
+                if self.is_empty() || self.get_char().unwrap() != '=' {
                     Token::Equal
                 } else {
                     Token::EqualEqual
@@ -180,7 +199,7 @@ impl Lexer {
             },
             '+' => {
                 if !self.is_empty() {
-                    match self.get_char(0).unwrap() {
+                    match self.get_char().unwrap() {
                         '+' => Token::PlusPlus,
                         '=' => Token::PlusEqual,
                         _   => Token::Plus,
@@ -191,7 +210,7 @@ impl Lexer {
             },
             '-' => {
                 if !self.is_empty() {
-                    match self.get_char(0).unwrap() {
+                    match self.get_char().unwrap() {
                         '-' => Token::MinusMinus,
                         '=' => Token::MinusEqual,
                         _   => Token::Minus,
@@ -201,28 +220,27 @@ impl Lexer {
                 }
             },
             '*' => {
-                if self.is_empty() || self.get_char(0).unwrap() != '=' {
+                if self.is_empty() || self.get_char().unwrap() != '=' {
                     Token::Multiply
                 } else {
                     Token::MultiplyEqual
                 }
             },
             '/' => {
-                if self.is_empty() || self.get_char(0).unwrap() != '=' {
+                if self.is_empty() || self.get_char().unwrap() != '=' {
                     Token::Divide
                 } else {
                     Token::DivideEqual
                 }
             },
             '%' => {
-                if self.is_empty() || self.get_char(0).unwrap() != '=' {
+                if self.is_empty() || self.get_char().unwrap() != '=' {
                     Token::Mod
                 } else {
                     Token::ModEqual
                 }
-            }
-            // TODO: add proper error reporting
-            _ => panic!("Unknown symbol {cur_char}"),
+            },
+            _ => return Err(LexerError::UnknownToken(cur_char)),
         });
     }
 
@@ -236,7 +254,7 @@ impl Lexer {
 
     fn chop_char(&mut self) {
         if !self.is_empty() {
-            let c: char = self.get_char(0).unwrap();
+            let c: char = self.get_char().unwrap();
             self.cur += 1;
             if c == '\n' {
                 self.bol = self.cur;
@@ -246,17 +264,17 @@ impl Lexer {
     }
 
     fn trim_left(&mut self) {
-        while !self.is_empty() && self.get_char(0).unwrap().is_whitespace() {
+        while !self.is_empty() && self.get_char().unwrap().is_whitespace() {
             self.chop_char();
         }
     }
 
     fn drop_line(&mut self) {
-        while !self.is_empty() && self.get_char(0).unwrap() == '\n' { self.chop_char(); }
+        while !self.is_empty() && self.get_char().unwrap() == '\n' { self.chop_char(); }
         if !self.is_empty() { self.chop_char(); }
     }
 
-    fn get_char(&self, index: usize) -> Option<char> {
-        self.source.chars().nth(self.cur + index)
+    fn get_char(&self) -> Option<char> {
+        self.source.chars().nth(self.cur)
     }
 }
