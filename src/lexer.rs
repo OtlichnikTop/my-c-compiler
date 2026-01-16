@@ -8,10 +8,10 @@ pub enum LexerError {
 }
 
 #[derive(Debug, Clone)]
-pub enum Token {
+pub enum Token<'src> {
     // Special
     EOF,
-    ID(String),
+    ID(&'src str),
 
     // Literals
     Int(i32),        // 123
@@ -50,6 +50,7 @@ pub enum Token {
     XorEqual,        // ^=
     ShiftLeftEqual,  // <<=
     ShiftRightEqual, // >>=  `ShREq` operator :)
+    Arrow,           // ->
     
     // Separators
     OParen,          // (
@@ -60,7 +61,7 @@ pub enum Token {
     SemiColon,       // ;
 }
 
-impl PartialEq for Token {
+impl<'src> PartialEq for Token<'src> {
     fn eq(&self, other: &Self) -> bool {
         use std::mem;
         mem::discriminant(self) == mem::discriminant(other)
@@ -81,8 +82,8 @@ impl fmt::Display for Location {
 }
 
 #[derive(Debug, Clone)]
-pub struct Lexer {
-    source: String,
+pub struct Lexer<'src> {
+    source: &'src str,
     filepath: String,
 
     cur: usize, // Cursor
@@ -90,8 +91,8 @@ pub struct Lexer {
     bol: usize, // Start of current row
 }
 
-impl Lexer {
-    pub fn new(source: String, filepath: String) -> Self {
+impl<'src> Lexer<'src> {
+    pub fn new(source: &'src str, filepath: String) -> Self {
         Self {
             source,
             filepath,
@@ -112,76 +113,23 @@ impl Lexer {
         }
     }
 
-    pub fn get_token(&mut self) -> Result<Token, LexerError> {
+    pub fn get_token(&mut self) -> Result<Token<'src>, LexerError> {
         self.trim_left();
         if self.is_empty() { return Ok(Token::EOF); }
 
-        let cur_char = self.get_char().unwrap();
-
         // TODO: add comments support. Maybe remove those in preprocessor stage???
+
+        let first_char = self.get_char().unwrap();
+
+        match first_char {
+            c if c.is_alphabetic() || c == '_' => self.lex_id(),
+            c if c.is_ascii_digit()            => self.lex_number(),
+            '\''                               => self.lex_char(),
+            '"'                                => self.lex_string(),
+            _                                  => self.lex_operator_or_separator(),
+        }
         
-        if cur_char.is_alphabetic() {
-            let start: usize = self.cur;
-            while !self.is_empty() && self.get_char().unwrap().is_alphanumeric() {
-                self.chop_char();
-            }
-
-            return Ok(Token::ID(self.source[start..self.cur].to_string()))
-        }
-
-        if cur_char.is_ascii_digit() {
-            let start = self.cur;
-            while !self.is_empty() && self.get_char().unwrap().is_ascii_digit() {
-                self.chop_char();
-            }
-            let value: i32 = self.source[start..self.cur].parse().unwrap();
-            return Ok(Token::Int(value));
-        }
-
-        if cur_char == '"' {
-            use std::vec::Vec;
-            self.chop_char();
-            let mut string: Vec<char> = Vec::new();
-            loop {
-                if self.is_empty() { return Err(LexerError::UnterminatedStringLiteral); }
-                let ch = self.get_char().unwrap();
-                if ch == '"' { break; }
-
-                if ch == '\\' {
-                    if self.is_empty() { return Err(LexerError::UnterminatedStringLiteral); }
-                    self.chop_char();
-                    string.push(match self.get_char().unwrap() {
-                        // TODO: add support for \nnn, \xhh…, \uhhhh, \Uhhhhhhhh
-                        // https://en.wikipedia.org/wiki/Escape_sequences_in_C#Escape_sequences
-                        'a' => 0x07 as char, // Alert (Beep, Bell) - Added in C89
-                        'b' => 0x08 as char, // Backspace
-                        'e' => 0x1B as char, // Escape character
-                        'f' => 0x0C as char, // Formfeed Page Break
-                        'v' => 0x0B as char, // Vertical Tab
-                        
-                        '?' => '?',  // Question mark (used to avoid trigraphs) https://en.wikipedia.org/wiki/Digraphs_and_trigraphs_(programming)#C
-                        'n' => '\n', // Newline
-                        'r' => '\r', // Carriage Return
-                        't' => '\t', // Horizontal Tab
-                        
-                        '\'' => '\'',
-                        '"' => '"',
-                        '\\' => '\\',
-                        _ => return Err(
-                            LexerError::UnknownEscapeSequence(format!("\\{}", self.get_char().unwrap()))
-                        ),
-                    });
-                } else {
-                    string.push(ch);
-                }
-                self.chop_char();
-            }
-            self.chop_char();
-            return Ok(Token::String(string.into_iter().collect::<String>()));
-        }
-
-        self.chop_char();
-
+        /*
         return Ok(match cur_char {
             '(' => Token::OParen,
             ')' => Token::CParen,
@@ -241,13 +189,125 @@ impl Lexer {
                 }
             },
             _ => return Err(LexerError::UnknownToken(cur_char)),
-        });
+    });
+         */
     }
 
     pub fn get_location(&self) -> Location {
         Location { filepath: self.filepath.clone(), row: self.row, col: self.cur - self.bol }
     }
 
+    fn lex_id(&mut self) -> Result<Token<'src>, LexerError> {
+        let start: usize = self.cur;
+        self.consume_while(|c| c.is_alphanumeric() || c == '_');
+        let text = &self.source[start..self.cur];
+        return Ok(Token::ID(text));
+    }
+
+    fn lex_number(&mut self) -> Result<Token<'src>, LexerError> {
+        let start: usize = self.cur;
+        self.consume_while(|c| c.is_ascii_digit());
+        // TODO: add support for floats, doubles, hexadecimals, octals, etc.
+        let text = &self.source[start..self.cur];
+        let value: i32 = text.parse().unwrap();
+        return Ok(Token::Int(value));
+    }
+
+    fn lex_char(&mut self) -> Result<Token<'src>, LexerError> { todo!("lex_char") }
+    
+    fn lex_string(&mut self) -> Result<Token<'src>, LexerError> {
+        self.chop_char(); // Skip opening `"`
+
+        let mut string_content: Vec<char> = Vec::new();
+        
+        while !self.is_empty() {
+            let ch: char = self.get_char().unwrap();
+
+            if ch == '"' {
+                self.chop_char(); // Skip closing `"`
+                let string_content: String = string_content.into_iter().collect();
+                return Ok(Token::String(string_content));
+            }
+
+            if ch == '\\' {
+                self.chop_char(); // Skip `\`
+                if self.is_empty() { return Err(LexerError::UnterminatedStringLiteral); }
+
+                // TODO: add support for \nnn, \xhh…, \uhhhh, \Uhhhhhhhh
+                // https://en.wikipedia.org/wiki/Escape_sequences_in_C#Escape_sequences
+
+                let real_char: char = match self.get_char().unwrap() {
+                    'a' => 0x07 as char, // Alert (Beep, Bell) - Added in C89
+                    'b' => 0x08 as char, // Backspace
+                    'e' => 0x1B as char, // Escape character
+                    'f' => 0x0C as char, // Formfeed Page Break
+                    'v' => 0x0B as char, // Vertical Tab
+                    
+                    '?' => '?',          // Question mark (used to avoid trigraphs)
+                    // https://en.wikipedia.org/wiki/Digraphs_and_trigraphs_(programming)#C
+                    
+                    'n' => '\n',         // Newline
+                    'r' => '\r',         // Carriage Return
+                    't' => '\t',         // Horizontal Tab
+                    
+                    '\'' => '\'',        // '
+                    '"' => '"',          // "
+                    '\\' => '\\',        // \
+                    
+                    _ => return Err(
+                        LexerError::UnknownEscapeSequence(format!("\\{}", self.get_char().unwrap()))
+                    ),
+                };
+                string_content.push(real_char);
+
+                self.chop_char();
+                continue;
+            }
+            
+            string_content.push(ch);
+            self.chop_char();
+        }
+    
+        return Err(LexerError::UnterminatedStringLiteral);
+    }
+
+    fn lex_operator_or_separator(&mut self) -> Result<Token<'src>, LexerError> {
+        let cur_char: char = self.get_char().unwrap();
+        self.chop_char();
+        
+        return Ok(
+            match cur_char {
+                '(' => Token::OParen,
+                ')' => Token::CParen,
+                '{' => Token::OCurly,
+                '}' => Token::CCurly,
+                ';' => Token::SemiColon,
+                ',' => Token::Comma,
+
+                '=' => {
+                    if self.is_empty() { return Ok(Token::Equal); }
+
+                    let cur_char: char = self.get_char().unwrap();
+                    if cur_char.is_whitespace() || cur_char.is_alphanumeric() {
+                        return Ok(Token::Equal);
+                    }
+
+                    if cur_char == '=' { return Ok(Token::EqualEqual); }
+                    
+                    return Err(LexerError::UnknownToken(cur_char))
+                },
+                
+                _   => return Err(LexerError::UnknownToken(cur_char)),
+            }
+        );
+    }
+
+    fn consume_while<P>(&mut self, predicate: P) where P: Fn(char) -> bool {
+        while !self.is_empty() && predicate(self.get_char().unwrap()) {
+            self.chop_char();
+        }
+    }
+        
     fn is_empty(&self) -> bool {
         self.cur >= self.source.len()
     }

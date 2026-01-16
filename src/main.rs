@@ -14,7 +14,7 @@ fn main() {
         },
     };
 
-    let mut lexer: clex::Lexer = clex::Lexer::new(source_code, FILEPATH.to_string());
+    let mut lexer: clex::Lexer = clex::Lexer::new(&source_code, FILEPATH.to_string());
     
     loop {
         let token = lexer.get_token().unwrap();
