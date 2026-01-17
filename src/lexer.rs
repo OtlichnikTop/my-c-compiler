@@ -102,7 +102,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    pub fn expect_token(&mut self, expected_token: Token) -> Result<Option<Token>, LexerError> {
+    pub fn expect_token(&mut self, expected_token: Token) -> Result<Option<Token<'src>>, LexerError> {
         match self.get_token() {
             Ok(token) => Ok(if token == expected_token {
                 Some(token)
@@ -213,7 +213,9 @@ impl<'src> Lexer<'src> {
         return Ok(Token::Int(value));
     }
 
-    fn lex_char(&mut self) -> Result<Token<'src>, LexerError> { todo!("lex_char") }
+    fn lex_char(&mut self) -> Result<Token<'src>, LexerError> {
+        todo!("lex_char")
+    }
     
     fn lex_string(&mut self) -> Result<Token<'src>, LexerError> {
         self.chop_char(); // Skip opening `"`
@@ -233,31 +235,8 @@ impl<'src> Lexer<'src> {
                 self.chop_char(); // Skip `\`
                 if self.is_empty() { return Err(LexerError::UnterminatedStringLiteral); }
 
-                // TODO: add support for \nnn, \xhh…, \uhhhh, \Uhhhhhhhh
-                // https://en.wikipedia.org/wiki/Escape_sequences_in_C#Escape_sequences
+                let real_char = self.lex_escape_sequence()?;
 
-                let real_char: char = match self.get_char().unwrap() {
-                    'a' => 0x07 as char, // Alert (Beep, Bell) - Added in C89
-                    'b' => 0x08 as char, // Backspace
-                    'e' => 0x1B as char, // Escape character
-                    'f' => 0x0C as char, // Formfeed Page Break
-                    'v' => 0x0B as char, // Vertical Tab
-                    
-                    '?' => '?',          // Question mark (used to avoid trigraphs)
-                    // https://en.wikipedia.org/wiki/Digraphs_and_trigraphs_(programming)#C
-                    
-                    'n' => '\n',         // Newline
-                    'r' => '\r',         // Carriage Return
-                    't' => '\t',         // Horizontal Tab
-                    
-                    '\'' => '\'',        // '
-                    '"' => '"',          // "
-                    '\\' => '\\',        // \
-                    
-                    _ => return Err(
-                        LexerError::UnknownEscapeSequence(format!("\\{}", self.get_char().unwrap()))
-                    ),
-                };
                 string_content.push(real_char);
 
                 self.chop_char();
@@ -269,6 +248,35 @@ impl<'src> Lexer<'src> {
         }
     
         return Err(LexerError::UnterminatedStringLiteral);
+    }
+
+    fn lex_escape_sequence(&mut self) -> Result<char, LexerError> {
+        // TODO: add support for \nnn, \xhh…, \uhhhh, \Uhhhhhhhh
+        // https://en.wikipedia.org/wiki/Escape_sequences_in_C#Escape_sequences
+        return Ok(
+            match self.get_char().unwrap() {
+                'a' => 0x07 as char, // Alert (Beep, Bell) - Added in C89
+                'b' => 0x08 as char, // Backspace
+                'e' => 0x1B as char, // Escape character
+                'f' => 0x0C as char, // Formfeed Page Break
+                'v' => 0x0B as char, // Vertical Tab
+                
+                '?' => '?',          // Question mark (used to avoid trigraphs)
+                // https://en.wikipedia.org/wiki/Digraphs_and_trigraphs_(programming)#C
+                
+                'n' => '\n',         // Newline
+                'r' => '\r',         // Carriage Return
+                't' => '\t',         // Horizontal Tab
+                
+                '\'' => '\'',        // '
+                '"' => '"',          // "
+                '\\' => '\\',        // \
+                
+                _ => return Err(
+                    LexerError::UnknownEscapeSequence(format!("\\{}", self.get_char().unwrap()))
+                ),
+            }
+        );
     }
 
     fn lex_operator_or_separator(&mut self) -> Result<Token<'src>, LexerError> {
